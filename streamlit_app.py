@@ -1,3 +1,4 @@
+import csv
 from datetime import timedelta
 from matplotlib import pyplot as plt
 import streamlit as st
@@ -6,16 +7,35 @@ import pickle
 import os
 import requests  # Import the requests library
 from io import StringIO  # To read string as file
+from io import BytesIO
 
-# Cloud storage URL for train.csv
+# Cloud storage URL for train.csv 
+#TRAIN_CSV_URL = "YOUR_PUBLIC_LINK_TO_TRAIN_CSV"
 TRAIN_CSV_URL = "https://drive.google.com/uc?export=download&id=18JnM4YQl9covb_g43znFSlZOoOmWWCyL"
+
+# Google Drive URL for sarimax model 
+SARIMAX_MODEL_URL = "https://drive.google.com/uc?export=download&id=1wHJ_NQSfkCGe_KCIUAZB8QMdtcDadOBV"  
 
 # Function to load the SARIMAX model
 @st.cache_resource  # Cache to load only once
-def load_model(model_path):
-    with open(model_path, 'rb') as file:
-        model = pickle.load(file)
-    return model
+def load_model(url):
+    """Downloads the model from the given URL."""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()  # Raise an exception for bad status codes
+
+        # Load the model from the downloaded content
+        model = pickle.load(BytesIO(response.content))
+        return model
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error downloading the model: {e}")
+        return None
+    except pickle.PickleError as e:
+        st.error(f"Error unpickling the model: {e}")
+        return None
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
 
 # Function to load data with caching
 @st.cache_data # Cache the dataframe
@@ -26,14 +46,22 @@ def load_data(url):
         response.raise_for_status()  # Raise an exception for bad status codes
         csv_data = StringIO(response.text)  # Treat response content as a file
 
-        # Attempt to read the data using pandas
-        df = pd.read_csv(csv_data, dtype={'StateHoliday': str})
-        return df
+        # Attempt to read the data using pandas, trying different options
+        try:
+            df = pd.read_csv(csv_data, sep=',', quotechar='"', quoting=csv.QUOTE_MINIMAL, encoding='utf-8', dtype={'StateHoliday': str})
+            return df
+        except Exception as e:
+            st.write(f"Attempt 1 failed: {e}") # Helpful debug
+            try:
+               df = pd.read_csv(csv_data, sep=';', quotechar='"', quoting=csv.QUOTE_MINIMAL, encoding='utf-8', dtype={'StateHoliday': str})
+               return df
+            except Exception as e2:
+                st.write(f"Attempt 2 failed: {e2}") # Helpful debug
+                st.error(f"Could not read the data. Check the file and URL.")
+                return None
+
     except requests.exceptions.RequestException as e:
         st.error(f"Error downloading the data: {e}")
-        return None
-    except pd.errors.ParserError as e:
-        st.error(f"Error parsing the CSV data: {e}")
         return None
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
@@ -93,9 +121,9 @@ if df_train is None:
 
 # Load SARIMAX model
 try:
-    sarimax_model = load_model('models/sarimax_model.pkl')
-except FileNotFoundError as e:
-    st.error(f"Model file not found: {e}. Make sure to train the SARIMAX model first!")
+    sarimax_model = load_model(SARIMAX_MODEL_URL) # From Cloud now!
+except Exception as e:
+    st.error(f"Model file not found. {e} Make sure to train the SARIMAX model and upload it to Google Drive!")
     st.stop()
 
 # --- Streamlit App ---
